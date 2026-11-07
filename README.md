@@ -1,6 +1,17 @@
-# DEX Scheduler
+# DEX_Cal (formerly DEX Scheduler)
 
-A two-person PWA for **Andrew and Greyson**, designed for Android and iPhone. It combines planned away times, a shared scheduled-bills view, a sourced curiosity panel and Dexter's famously unimpressed commentary.
+A two-person PWA for **Andrew and Greyson**, designed for Android and iPhone. The user-selected product name is **DEX_Cal**; the current shipped app, GitHub repository slug and Pages URL still use the older **DEX Scheduler** branding until a future authorized migration. It combines planned away times, scheduled bills, trivia and Dexter's judgmental commentary.
+
+
+## Implementation handoff and selected portrait design (November 7, 2026)
+
+**Use [`docs/DEX_CAL_IMPLEMENTATION_HANDOFF.md`](docs/DEX_CAL_IMPLEMENTATION_HANDOFF.md) as the successor-AI development contract and complete build plan.** It includes the copy-ready handoff prompt, verified repository state, privacy and non-regression constraints, staged implementation sequence, acceptance matrix, safe commands and open questions.
+
+The chosen design references are committed under [`docs/design-references/`](docs/design-references/README.md): a user-selected portrait phone UI and the later requested Day, Week and Month ruled-paper mockups. The intended new calendar has **one straight hour line per hour** in Day and Week, a real **seven-column Week**, a true **Month** and progressive pinch **Day -> Week -> Month** (with visible button alternatives). **These views and the new DEX_Cal runtime branding are NOT yet implemented.** Existing horizontal day/week tracks remain in the live preview.
+
+**Source baseline for the handoff:** `main` at `386f91773328f836382dfbdbfe98374d6482cddd` before the documentation-only handoff update. The repository and Pages URL have **not** been renamed. GitHub documents that project Pages URLs do not automatically redirect after repository renames; see the migration guardrails in the handoff.
+
+The recommended *next authorized implementation slice* is **Phase 0-2: verify current HEAD, preserve/test the existing two-person source, build the portrait DEX_Cal shell and a true vertical 24-hour lined Day calendar**. Then add the full seven-column Week, Month and progressive pinch in Phase 3. Cloudflare deployment comes after the safe pre-backend UI/rehearsal work unless newly authorized otherwise.
 
 > **Current state: initial implementation, not a production-ready household service.** The GitHub Pages frontend is a public static shell. Until a separate private API/database is configured, it intentionally runs **sample preview only** and never pretends to create real accounts or sync sensitive schedules.
 
@@ -42,7 +53,7 @@ worker/
   src/index.js         Cloudflare Worker private API / authentication
   schema.sql           D1 schema
   wrangler.jsonc       Template; database ID needs configuring
-  .dev.vars.example    Template for local-only secret names
+  # .dev.vars.example is NOT currently present in the verified remote tree.
 .github/workflows/pages.yml  GitHub Pages deployment workflow
 ```
 
@@ -50,7 +61,7 @@ worker/
 
 The repository workflow runs Node syntax/API/service-worker checks before publishing **only** `public/` to Pages after a push to `main`. It does not upload `worker/`, scripts or documentation as public site assets.
 
-**First-time setup is a separate repository admin action:** open **Settings → Pages → Build and deployment → Source: GitHub Actions**. The included `configure-pages` action cannot initially enable Pages with the workflow's standard `GITHUB_TOKEN`; see the [GitHub Pages publishing source documentation](https://docs.github.com/en/pages/getting-started-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site).
+**Current source deployment is verified:** GitHub Actions run [42366806040](https://github.com/westkitty/Dex_Scheduler/actions/runs/42366806040) succeeded for the baseline `386f917`. For an independent fork/new repo, Pages source setup may still be needed (Settings > Pages > Build and deployment > GitHub Actions).
 
 The intended URL is `https://westkitty.github.io/Dex_Scheduler/` after a successful Pages deployment. **Do not assume it is live until a successful deploy and HTTP readback are observed.**
 
@@ -103,4 +114,4 @@ After starting the local server, visit `http://localhost:8765/` to inspect the e
 - Daily trivia uses a shared interest pool and may be date-specific or general.
 - Dexter may appear independently inside the app, but no GPS tracking or native phone companion is planned for the initial version.
 
-**Priority for the next implementation pass:** get access to the intended Cloudflare account, create the private D1 database, deploy and configure the Worker, test real account creation on two devices, then add Web Push and verified Dexter animation/server-side AI behind explicit cost and privacy controls. Until the Worker is actually deployed, the public Pages build remains clearly labeled preview only.
+**Priority for the next implementation pass:** follow the new DEX_Cal [handoff](docs/DEX_CAL_IMPLEMENTATION_HANDOFF.md): selected portrait design and Day/Week/Month ruled-paper calendar with progressive pinch, test stable drafts/ownership and rehearsal UX, then deploy the private D1/Worker with explicit user infrastructure authority. Web Push, validated Dexter animation and optional server-side AI are later gated phases. Until a real Worker is deployed and configured, the public Pages build remains clearly labeled preview only.

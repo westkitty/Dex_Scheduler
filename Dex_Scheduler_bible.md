@@ -48,3 +48,24 @@ Before another coding pass, read the current remote HEAD/tree, README, this ledg
 - **GitHub Actions receipt:** [run 42366722513](https://github.com/westkitty/Dex_Scheduler/actions/runs/42366722513) completed successfully. Both `verify` (Node syntax, API, service-worker tests) and `deploy` (GitHub Pages) jobs succeeded for that exact implementation commit.
 - **Remaining external blocker:** the private Cloudflare Worker/D1 is *not* deployed; the publicly reachable Pages frontend still labels itself sample preview. Automated tests do not prove real phone push notifications or real two-device Cloudflare sync.
 - **This ledger receipt update** is a documentation-only follow-up; it does not alter published app code.
+
+## 2026-11-07 - DEX_Cal successor handoff and portrait design lock
+
+### Authority, design and current repository state
+
+- The user changed the **product name** to `DEX_Cal`. As of this entry, the real repo remains `westkitty/Dex_Scheduler`, `main` baseline `386f91773328f836382dfbdbfe98374d6482cddd`; the Pages URL remains `https://westkitty.github.io/Dex_Scheduler/`. No GitHub repository/Pages URL rename, Worker deployment or runtime UI rebuild has been performed by this documentation task.
+- The user explicitly selected one **portrait phone** charcoal-and-turquoise calendar image, then requested **one straight notebook-paper rule for each hour**, full **seven-column Week** and **Month** with progressive Day -> Week -> Month pinch zoom. `Both home` must **never** render as purple; purple means simultaneous *away* windows only.
+- Checked-in handoff: `docs/DEX_CAL_IMPLEMENTATION_HANDOFF.md` and its four visual refs in `docs/design-references/`, plus an updated root README and design-reference README. The original historical discovery handoff was examined but not publicly copied; it predates the built project and contains stale 'not built' language.
+- Purpose and privacy protected: two roles `andrew`/`greyson`, separate private personal passwords/invites, weak shared `Dexter` entry ceremony, assumed-home-not-GPS, local private drafts until deliberate publish, 409 conflict preservation, urgent-only change path, generic batch messages and specific urgent alert semantics, shared-bill total once, accurate fact sources and optional non-blocking Dexter. Do not place household secrets/private photos in public GitHub.
+
+### Verification performed for planning (not a redesign implementation)
+
+- Live GitHub tree/repo/CI inspected and every locally reconstructed source blob SHA matched the remote tree on the baseline.
+- Node 22.16.0: `node --check public/app.js`, `node --check worker/src/index.js`, `node --experimental-sqlite --test tests/api.test.mjs` (6/6 pass), `node --test tests/sw.test.mjs` (2/2 pass). Chromium Playwright `python3 tests/smoke_browser.py` PASS at original desktop/mobile preview journey. Previous remote GitHub Actions run `42366806040` succeeded at baseline `386f917`. These prove only the **old** interface/backend harness.
+- Scoped external documentation check: MDN pinch/touch-action behavior, WCAG 2.2 non-drag alternatives, Apple iOS home-screen Web Push, Cloudflare D1 migrations and GitHub Pages URL caveat after repo rename. Sources linked inside the new handoff.
+
+### Next authorized work and known blockers
+
+- Begin with `docs/DEX_CAL_IMPLEMENTATION_HANDOFF.md`, verify current HEAD and preserve user changes; implement Phase 1-2 portrait shell/true ruled Day, then Phase 3 seven-column Week/Month/multilevel gestures with real phone tests. This documentation entry is **not authority** for future commits, deployments, paid services, remote rename or canonical likeness generation.
+- Cloudflare Worker/D1 and real accounts remain unconfigured (`public/config.js` `apiBase` empty, `worker/wrangler.jsonc` placeholder ID). Real iPhone/Android sync, push, production AI and approved animated Dexter likeness remain unverified/unbuilt as listed in handoff.
+- A future implementation team must preserve old published schedule data, source APIs, local drafts, release path and the *append-only* nature of this Bible, and must not treat static example schedule labels as real household data.
