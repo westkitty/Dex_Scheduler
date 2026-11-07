@@ -1,17 +1,28 @@
-const CACHE = 'dex-shell-v1';
-const FILES = ['./', './index.html', './styles.css', './config.js', './app.js', './facts.js', './icon.svg', './icon-192.png', './icon-512.png', './manifest.webmanifest'];
-self.addEventListener('install', event => { event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(FILES))); self.skipWaiting(); });
-self.addEventListener('activate', event => { event.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(key => key !== CACHE).map(key => caches.delete(key))))); self.clients.claim(); });
-self.addEventListener('fetch', event => {
-  if (event.request.method !== 'GET' || new URL(event.request.url).origin !== self.location.origin) return;
-  if (new URL(event.request.url).pathname.endsWith('/config.js')) {
-    event.respondWith(fetch(event.request).then(async response => { const cache = await caches.open(CACHE); await cache.put(event.request, response.clone()); return response; }).catch(() => caches.match(event.request)));
-    return;
-  }
-  if (event.request.mode === 'navigate') {
-    event.respondWith(fetch(event.request).catch(() => caches.match('./index.html')));
-    return;
-  }
-  event.respondWith(caches.match(event.request).then(match => match || fetch(event.request)));
+// Offline static shell only. No schedule, bill, or authentication responses enter this cache.
+const CACHE = 'dex-shell-v2';
+const ASSETS = ['./', './index.html', './styles.css', './config.js', './app.js', './facts.js', './icon.svg', './icon-192.png', './icon-512.png', './manifest.webmanifest'];
+const ALLOWED = new Set(ASSETS.map(path => new URL(path, self.registration.scope).pathname));
+self.addEventListener('install', event => {
+  event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(ASSETS)));
+  self.skipWaiting();
 });
-// Push subscription and delivery remain unimplemented until the private backend is configured and device-tested.
+self.addEventListener('activate', event => {
+  event.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(key => key.startsWith('dex-shell-') && key !== CACHE).map(key => caches.delete(key)))));
+  self.clients.claim();
+});
+self.addEventListener('fetch', event => {
+  const url = new URL(event.request.url);
+  if (event.request.method !== 'GET' || url.origin !== self.location.origin || !ALLOWED.has(url.pathname)) return;
+  // Network-first assets allow new deployments to replace old JS/CSS, with offline fallback.
+  event.respondWith(fetch(event.request).then(async response => {
+    if (response.ok) {
+      const cache = await caches.open(CACHE);
+      await cache.put(event.request, response.clone());
+    }
+    return response;
+  }).catch(async () => {
+    const fallback = await caches.match(event.request);
+    return fallback || (event.request.mode === 'navigate' ? await caches.match('./index.html') : Response.error());
+  }));
+});
+// Web Push requires a separate private server, consent and device-level integration.

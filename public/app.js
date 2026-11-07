@@ -19,9 +19,10 @@
   const state = {
     step: 'gate', ticket: null, token: localStorage.getItem('dex:token:v1') || null,
     role: null, selectedRole: null, status: null, invite: null,
-    data: null, draft: null, dirty: false, preview: false,
-    view: 'day', screen: 'calendar', date: localToday(), fact: null,
-    cameoTimer: null, pollTimer: null, cameoVisible: false, busy: false
+    data: null, draft: null, dirty: false, draftBaseRevision: 0, draftConflict: false, preview: false,
+    view: 'day', screen: 'calendar', date: localToday(), fact: null, editingAwayId: null,
+    cameoTimer: null, pollTimer: null, cameoVisible: false, busy: false,
+    lastSyncedAt: null, syncError: false, renderDeferred: false, refreshRequest: 0
   };
 
   function consumeInvite() {
@@ -110,17 +111,24 @@
   function resetDraft() {
     const row = state.data.schedules[state.role] || { revision: 0, events: [] };
     state.draft = structuredClone(row.events);
+    state.draftBaseRevision = row.revision;
+    state.draftConflict = false;
     state.dirty = false;
   }
   function restoreDraft() {
     const saved = getStoredDraft();
     const row = state.data.schedules[state.role] || { revision: 0, events: [] };
-    if (saved?.dirty && saved.baseRevision === row.revision && Array.isArray(saved.events)) { state.draft = saved.events; state.dirty = true; }
-    else { resetDraft(); if (saved && !state.preview) localStorage.removeItem(`dex:draft:${state.role}`); }
+    // Never silently discard unpublished work after a conflicting publication.
+    if (saved?.dirty && Number.isInteger(saved.baseRevision) && saved.baseRevision >= 0 && Array.isArray(saved.events)) {
+      state.draft = saved.events;
+      state.draftBaseRevision = saved.baseRevision;
+      state.draftConflict = saved.baseRevision !== row.revision;
+      state.dirty = true;
+    } else { resetDraft(); if (saved && !state.preview) localStorage.removeItem(`dex:draft:${state.role}`); }
   }
   function saveDraft() {
     state.dirty = true;
-    if (!state.preview) localStorage.setItem(`dex:draft:${state.role}`, JSON.stringify({ baseRevision: state.data.schedules[state.role].revision, events: state.draft, dirty: true }));
+    if (!state.preview) localStorage.setItem(`dex:draft:${state.role}`, JSON.stringify({ baseRevision: state.draftBaseRevision, events: state.draft, dirty: true }));
   }
   function viewedEvents(role) {
     if (state.role === role && state.dirty) return state.draft;
@@ -135,15 +143,21 @@
   }
   function segmentsFor(day) {
     const from = dayAt(day, '00:00'), to = dayAt(addDays(day, 1), '00:00');
-    const entries = Object.keys(ROLES).flatMap(role => viewedEvents(role).filter(e => e.start < to && e.end > from).map(e => ({ start: Math.max(from, e.start), end: Math.min(to, e.end), role })));
+    const publishedOwn = new Map((state.data.schedules[state.role]?.events || []).map(e => [e.id, e]));
+    const entries = Object.keys(ROLES).flatMap(role => viewedEvents(role).filter(e => e.start < to && e.end > from).map(e => {
+      const original = publishedOwn.get(e.id);
+      const pending = role === state.role && state.dirty && (!original || original.start !== e.start || original.end !== e.end || original.label !== e.label);
+      return { start: Math.max(from, e.start), end: Math.min(to, e.end), role, pending };
+    }));
     const edges = [...new Set([from, to, ...entries.flatMap(e => [e.start, e.end])])].sort((a,b) => a - b);
     const segments = [];
     for (let i = 0; i < edges.length - 1; i++) {
       const a = edges[i], b = edges[i+1];
-      const active = new Set(entries.filter(e => e.start < b && e.end > a).map(e => e.role));
+      const overlapping = entries.filter(e => e.start < b && e.end > a);
+      const active = new Set(overlapping.map(e => e.role));
       if (!active.size) continue;
       const person = active.size > 1 ? 'purple' : active.has('andrew') ? 'red' : 'blue';
-      const pending = state.dirty && active.has(state.role);
+      const pending = overlapping.some(e => e.pending);
       segments.push({ left: (a-from)/(to-from)*100, width: (b-a)/(to-from)*100, person, pending, start: a, end: b });
     }
     return segments;
@@ -168,13 +182,31 @@
         <span class="hour-grid" aria-hidden="true"></span>${bars}<span class="time-cursor" style="display:${day===localToday()?'block':'none'};left:${((Date.now()-dayAt(day,'00:00'))/(dayAt(addDays(day,1),'00:00')-dayAt(day,'00:00'))*100).toFixed(3)}%"></span>
       </div></div>`;
   }
+  function myAwayList() {
+    const published = state.data.schedules[state.role]?.events || [];
+    const from = dayAt(daysInView()[0], '00:00');
+    const to = dayAt(addDays(daysInView().at(-1), 1), '00:00');
+    const items = viewedEvents(state.role).filter(item => item.start < to && item.end > from).sort((a,b) => a.start - b.start);
+    return `<section class="panel away-list" aria-label="My scheduled away blocks">
+      <div class="panel-header"><div><h2>My away blocks</h2><p class="muted small">Edit or remove your own blocks here. Greyson or Andrew sees only what you publish.</p></div></div>
+      <div class="away-items">${items.length ? items.map(item => {
+        const previous = published.find(entry => entry.id === item.id);
+        const modified = !previous || previous.start !== item.start || previous.end !== item.end || previous.label !== item.label;
+        return `<div class="away-item"><span class="away-status ${modified && state.dirty ? 'pending' : ''}">${modified && state.dirty ? 'Draft' : 'Published'}</span>
+          <div class="away-item-copy"><strong>${enc(dateLabel(localDateOf(item.start)))} · ${enc(humanTime(item.start))}–${enc(humanTime(item.end))}</strong><span class="muted small">${enc(item.label || 'Away · No note')}</span></div>
+          <div class="away-item-actions"><button class="mini-link" data-action="edit-away" data-id="${enc(item.id)}" ${state.preview?'disabled':''} aria-label="Edit away block ${enc(item.label || dateLabel(localDateOf(item.start)))}">Edit</button><button class="mini-link danger" data-action="remove-away" data-id="${enc(item.id)}" ${state.preview?'disabled':''} aria-label="Remove away block ${enc(item.label || dateLabel(localDateOf(item.start)))}">Remove</button></div>
+        </div>`;
+      }).join('') : '<p class="empty">No away blocks in this view. Your calendar awaits instructions.</p>'}</div>
+    </section>`;
+  }
+  function localDateOf(ms) { const d = new Date(ms); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; }
   function dailySummary() {
     const next = other(state.role);
     const current = Date.now();
     const rows = viewedEvents(next).filter(e => e.end > current).sort((a,b) => a.start-b.start);
     const currentAway = rows.find(e => e.start <= current && current < e.end);
     if (currentAway) return { label: `${ROLES[next]} is scheduled out`, value: `Expected home ${humanTime(currentAway.end)}`, detail: 'Planned time, not live location' };
-    if (rows.length) return { label: `${ROLES[next]} is assumed home`, value: `Next away ends ${new Date(rows[0].end).toLocaleDateString('en-US',{weekday:'short'})} · ${humanTime(rows[0].end)}`, detail: 'Home is assumed unless marked out' };
+    if (rows.length) return { label: `${ROLES[next]} is assumed home`, value: `Next out ${new Date(rows[0].start).toLocaleDateString('en-US',{weekday:'short'})} · ${humanTime(rows[0].start)}`, detail: `Expected home after ${humanTime(rows[0].end)} · Planned, not tracked` };
     return { label: `${ROLES[next]} is assumed home`, value: 'No upcoming away blocks', detail: 'Home is assumed unless marked out' };
   }
   function calendarContent() {
@@ -182,7 +214,8 @@
     return `<section class="page-heading"><div><p class="eyebrow">Availability · Planned, not tracked</p><h1>Who's home?</h1><p class="muted">One shared timeline. You schedule only the time you'll be out.</p></div>
       <div class="button-set"><button class="button soft" data-action="show-updates">Updates ${state.data.activity.length ? `<span class="counter">${state.data.activity.length}</span>` : ''}</button><button class="button primary" data-action="add-away" ${state.preview ? 'disabled' : ''}>+ Add away time</button></div></section>
       <div class="summary-grid"><div class="summary-primary"><span class="eyebrow">${enc(day.label)}</span><div class="summary-value">${enc(day.value)}</div><div class="muted small">${enc(day.detail)}</div></div>
-      <div class="summary-secondary"><span class="eyebrow">Your schedule</span><strong>${state.dirty ? 'Unpublished edits' : 'All changes published'}</strong><span class="muted small">${state.dirty ? 'Only you can see these drafts.' : 'Last published information shown below.'}</span></div></div>
+      <div class="summary-secondary"><span class="eyebrow">Your schedule</span><strong>${state.dirty ? 'Unpublished edits' : 'All changes published'}</strong><span class="muted small">${state.dirty ? 'Only you can see these drafts.' : 'Last published information shown below.'}</span>${!state.preview && state.lastSyncedAt ? `<span class="muted small sync-stamp">Last checked ${enc(new Date(state.lastSyncedAt).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}))}</span>` : ''}</div></div>
+      ${curiosityPeek()}
       <section class="panel calendar-panel"><div class="panel-header"><div><h2>Timeline</h2><p class="muted small">Red: Andrew · Blue: Greyson · Purple: overlap</p></div>
         <div class="view-controls"><button class="icon-button" data-action="prev-date" aria-label="Previous ${state.view}">‹</button><input aria-label="Select day" id="date-picker" type="date" value="${state.date}"><button class="icon-button" data-action="next-date" aria-label="Next ${state.view}">›</button><div class="seg-toggle" role="group" aria-label="Calendar view"><button data-view="day" class="${state.view==='day'?'chosen':''}">Day</button><button data-view="week" class="${state.view==='week'?'chosen':''}">Week</button></div></div></div>
         <div class="hours"><span>12 AM</span><span>6 AM</span><span>12 PM</span><span>6 PM</span><span>12 AM</span></div>
@@ -190,9 +223,12 @@
         <div class="timeline-footer"><span class="swatch red"></span> Andrew <span class="swatch blue"></span> Greyson <span class="swatch purple"></span> Both <span class="swatch draft"></span> Draft
         <span class="muted small footnote">Long press & drag on a timeline to draft an away block. Use Day / Week if pinch gestures aren't available.</span></div>
       </section>
-      <div class="publish-row"><span>${state.dirty ? `${state.draft.length} item(s) in your private draft.` : 'Create a draft to start planning.'}</span><div class="button-set">
+      ${myAwayList()}
+      ${state.draftConflict ? `<div class="draft-conflict" role="alert"><strong>Published schedule changed while you were editing.</strong><p>Your drafts are safe on this device. Review the latest published events before choosing whether to keep or discard your edits. Nothing is sent automatically.</p><button class="button soft" data-action="rebase-draft">Keep my draft against the latest version</button></div>` : ''}
+      <div class="publish-row"><span>${state.dirty ? 'Unpublished changes are private to your device.' : 'Changes here are published only with Save & Sync.'}</span><div class="button-set">
        <button class="button soft" data-action="urgent" ${state.preview || !(state.data.schedules[state.role]?.events?.length) ? 'disabled' : ''}>⚡ Coming home early</button>
-       <button class="button primary" data-action="publish" ${!state.dirty || state.preview ? 'disabled' : ''}>Save & Sync ${state.dirty ? '· publish draft' : ''}</button></div></div>`;
+       ${state.dirty ? '<button class="button soft" data-action="discard-draft">Discard drafts</button>' : ''}
+       <button class="button primary" data-action="publish" ${!state.dirty || state.draftConflict || state.syncError || state.preview ? 'disabled' : ''}>Save & Sync ${state.dirty ? '· publish draft' : ''}</button></div></div>`;
   }
   function monthBillDates(bill, month) {
     const results = [];
@@ -219,24 +255,52 @@
           <div class="bill-end"><strong>${money(b.amount_cents)}</strong><button class="mini-link" data-action="toggle-bill" data-id="${enc(b.id)}" data-day="${day}" ${state.preview?'disabled':''}>${paid ? `Paid ${enc(paid.paid_date)} · undo` : 'Mark paid'}</button></div></div>`;
       }).join('') : '<p class="empty">No bills scheduled for this month. A rare moment of peace.</p>'}</div></section>`;
   }
-  function dayFact() {
+  function factPool() {
     const facts = window.DEX_FACTS || [];
     const tags = state.data?.interests.flatMap(t => t.tags.map(x=>x.toLowerCase())) || [];
-    const dateKey = localToday().slice(5);
-    const relevant = facts.filter(f => f.monthDay === dateKey);
-    const general = facts.filter(f => !f.monthDay && (tags.length===0 || tags.includes(f.category)));
-    const rest = facts.filter(f => !f.monthDay && !general.includes(f));
-    const pool = [...relevant, ...general, ...rest];
-    const indexKey = `dex:fact:${state.role || 'guest'}:${localToday()}`;
-    const seen = Number(sessionStorage.getItem(indexKey) || 0);
-    if (!pool.length) return null;
-    return pool[seen % pool.length];
+    const today = localToday().slice(5);
+    const onThisDay = facts.filter(f => f.monthDay === today);
+    const interests = facts.filter(f => !f.monthDay && (tags.length === 0 || tags.includes(f.category)));
+    const other = facts.filter(f => !f.monthDay && !interests.includes(f));
+    return [...onThisDay, ...interests, ...other];
   }
-  function nextFact() {
-    const indexKey = `dex:fact:${state.role || 'guest'}:${localToday()}`;
-    sessionStorage.setItem(indexKey, String(Number(sessionStorage.getItem(indexKey) || 0) + 1));
-    state.fact = dayFact();
-    render();
+  function factIndexKey() { return `dex:fact:${state.role || 'guest'}:${localToday()}`; }
+  function factCounter() {
+    try { return Math.max(0, Number(localStorage.getItem(factIndexKey()) || 0) || 0); }
+    catch { return 0; }
+  }
+  function dayFact() {
+    const pool = factPool();
+    return pool.length ? pool[Math.max(0, factCounter() - 1) % pool.length] : null;
+  }
+  function advanceFact() {
+    const pool = factPool();
+    if (!pool.length) return null;
+    const count = factCounter();
+    // Each opening advances a dated, locally retained cursor through the shared-interest pool.
+    try { localStorage.setItem(factIndexKey(), String(count + 1)); } catch { /* still show the fact */ }
+    return pool[count % pool.length];
+  }
+  function nextFact() { state.fact = advanceFact(); renderWhenSafe(); }
+  function factVerdict(fact) {
+    if (!fact) return 'The archives are empty. Naturally, I am blamed.';
+    const category = fact.category;
+    if (category === 'animals') return 'Three hearts, no scheduling app. A superior species, perhaps.';
+    if (category === 'space') return 'An entire universe. Still no satisfactory explanation for weasel walks.';
+    if (category === 'history') return 'I remember it differently. But I was not consulted.';
+    if (category === 'science') return 'Interesting. Let me know when science solves the treat shortage.';
+    return 'A new fact has been logged. The humans remain unimpressive.';
+  }
+  function curiosityPeek() {
+    const f = state.fact || dayFact();
+    return `<section class="panel daily-peek" data-testid="calendar-fact" aria-label="Today's shared curiosity">
+      <div class="daily-peek-copy"><p class="eyebrow">A reason to open the app · Today in the world</p>
+        <h3>${enc(f?.title || 'The archives are oddly quiet.')}</h3>
+        <p class="muted">${enc(f?.text || 'No fact available. Dexter is investigating.')}</p>
+        <span class="dex-aside">Dexter: “${enc(factVerdict(f))}”</span>
+      </div>
+      <div class="daily-peek-actions"><button class="button soft" data-action="next-fact">Another fact</button><button class="button soft" data-action="open-trivia">See the source & interests</button></div>
+    </section>`;
   }
   function triviaView() {
     const f = state.fact || dayFact();
@@ -244,7 +308,7 @@
     return `<section class="page-heading"><div><p class="eyebrow">Shared curiosity</p><h1>Today's peculiarities.</h1><p class="muted">On-this-day history and general trivia selected from both your interests.</p></div><button class="button primary" data-action="next-fact">Another fact →</button></section>
     <section class="panel fact-card"><div class="fact-top"><span class="fact-label">${f?.monthDay===localToday().slice(5)?'On this day':'Daily curiosity'} · ${enc(f?.category||'general')}</span><span class="muted small">${enc(dateLabel(localToday()))}</span></div>
       <h2>${enc(f?.title || 'The archives are temporarily silent.')}</h2><p class="fact-body">${enc(f?.text || '')}</p>
-      ${f?.source ? `<a class="source" href="${enc(f.source)}" target="_blank" rel="noopener noreferrer">Read the source ↗</a>` : ''}<div class="dex-comment">DEXTER'S ASSESSMENT <span>“I have reviewed this fact. Humanity remains questionable.”</span></div></section>
+      ${f?.source ? `<a class="source" href="${enc(f.source)}" target="_blank" rel="noopener noreferrer">Read the source ↗</a>` : ''}<div class="dex-comment">DEXTER'S ASSESSMENT <span>“${enc(factVerdict(f))}”</span></div></section>
     <section class="panel interests-panel"><div class="panel-header"><div><h2>Combined interests</h2><p class="muted small">Both people's interests contribute to the same pool.</p></div></div>
       <div class="chips">${tags.length ? tags.map(tag=>`<span class="chip">${enc(tag)}</span>`).join('') : '<span class="muted">Nothing added yet</span>'}</div>
       <form id="interests-form"><label for="interest-input">Your interests (comma-separated)</label><div class="inline-form"><input id="interest-input" name="tags" value="${enc(state.data.interests.find(x=>x.role===state.role)?.tags.join(', ')||'')}" placeholder="history, space, animals" ${state.preview?'disabled':''}><button class="button soft" ${state.preview?'disabled':''}>Save interests</button></div></form>
@@ -263,30 +327,38 @@
        <button data-nav="trivia" class="nav-item ${state.screen==='trivia'?'active':''}"><span>✦</span> Daily curiosity</button>
        <button data-nav="updates" class="nav-item ${state.screen==='updates'?'active':''}"><span>↻</span> Updates</button>
       </nav><div class="sidebar-bottom"><div class="familiar-label">THE FAMILIAR'S VERDICT</div><p>“An organized household. What a revolting concept.”</p><span class="muted small">Dexter · Chief of Disapproval</span></div></aside>
-      <div class="main-column"><header class="topbar"><div class="topbar-left"><span class="status-dot ${state.preview?'warn':''}"></span><span>${state.preview?'SAMPLE PREVIEW — NOTHING SYNCED':'Private household · '+enc(ROLES[state.role])}${enc(pending)}</span></div><div class="topbar-actions"><span class="muted small">${enc(new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'}))}</span><button class="user-pill" data-action="logout">${state.preview?'Exit preview':enc(ROLES[state.role])+' · Sign out'}</button></div></header>
-        <main class="page-content">${state.screen==='calendar'?calendarContent():state.screen==='bills'?billView():state.screen==='trivia'?triviaView():updatesView()}
+      <div class="main-column"><header class="topbar"><div class="topbar-left"><span class="status-dot ${state.preview || state.syncError?'warn':''}"></span><span>${state.preview?'SAMPLE PREVIEW — NOTHING SYNCED':state.syncError?'SYNC DELAYED · CHECK CONNECTION':'Private household · '+enc(ROLES[state.role])}${enc(pending)}</span></div><div class="topbar-actions"><span class="muted small">${enc(new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'}))}</span><button class="user-pill" data-action="logout">${state.preview?'Exit preview':enc(ROLES[state.role])+' · Sign out'}</button></div></header>
+        <main class="page-content">${state.syncError && !state.preview ? `<div class="sync-warning" role="alert"><strong>Cannot reach the private sync service.</strong> Schedules shown may be outdated. Unpublished drafts remain on this device. <button class="mini-link" data-action="refresh">Retry sync</button></div>` : ''}
+        ${state.screen==='calendar'?calendarContent():state.screen==='bills'?billView():state.screen==='trivia'?triviaView():updatesView()}
         <p class="page-footnote">Schedule = planned availability, not verified presence. ${state.preview?'All entries here are fictitious examples.':'Private drafts stay on this device until published.'}</p></main>
       </div><nav class="mobile-nav" aria-label="Mobile navigation"><button data-nav="calendar" class="${state.screen==='calendar'?'active':''}">◫<span>Calendar</span></button><button data-nav="bills" class="${state.screen==='bills'?'active':''}">♧<span>Bills</span></button><button data-nav="trivia" class="${state.screen==='trivia'?'active':''}">✦<span>Trivia</span></button><button data-nav="updates" class="${state.screen==='updates'?'active':''}">↻<span>Updates</span></button></nav>
       <div id="familiar" class="familiar ${state.cameoVisible?'show':''}" aria-live="off"><span class="familiar-monogram">D</span><div><span class="familiar-title">DEXTER HAS AN OPINION</span><p>${enc(dexLine())}</p></div><button data-action="hide-cameo" aria-label="Dismiss Dexter">×</button></div></div>
-      <dialog id="edit-dialog" class="modal"><form id="away-form" method="dialog"><div class="modal-header"><h2>Create an away draft</h2><button type="button" class="close-modal" data-action="close-modal" aria-label="Close">×</button></div><p class="muted small">Visible only to you until Save & Sync.</p><label>Date</label><input name="date" type="date" required><div class="time-fields"><div><label>From</label><input name="from" type="time" required></div><div><label>Until</label><input name="until" type="time" required></div></div><label>Optional note</label><input name="label" maxlength="100" placeholder="Work, appointment, or nothing at all"><div class="button-set modal-actions"><button class="button soft" type="button" data-action="close-modal">Cancel</button><button class="button primary" type="submit">Confirm draft</button></div></form></dialog>
-      <dialog id="bill-dialog" class="modal"><form id="bill-form" method="dialog"><div class="modal-header"><h2>New scheduled bill</h2><button type="button" class="close-modal" data-action="close-modal">×</button></div><label>Bill name</label><input name="title" maxlength="90" required placeholder="Electricity"><label>Amount in dollars</label><input name="amount" type="number" min="0" max="1000000" step="0.01" required><label>Due date</label><input name="date" type="date" required><label>Attribution</label><select name="owner"><option value="shared">Shared</option><option value="andrew">Andrew</option><option value="greyson">Greyson</option></select><label>Repeat</label><select name="recurrence"><option value="monthly">Monthly</option><option value="none">One-time</option></select><div class="button-set modal-actions"><button class="button soft" type="button" data-action="close-modal">Cancel</button><button class="button primary" type="submit">Save bill</button></div></form></dialog>
+      <dialog id="edit-dialog" class="modal"><form id="away-form" method="dialog"><div class="modal-header"><h2 id="away-modal-title">Create an away draft</h2><button type="button" class="close-modal" data-action="close-modal" aria-label="Close">×</button></div><p class="muted small">Visible only to you until Save & Sync.</p><input type="hidden" name="eventId" value=""><label for="away-date">Date</label><input id="away-date" name="date" type="date" required><div class="time-fields"><div><label for="away-from">From</label><input id="away-from" name="from" type="time" required></div><div><label for="away-until">Until</label><input id="away-until" name="until" type="time" required></div></div><label for="away-label">Optional note</label><input id="away-label" name="label" maxlength="100" placeholder="Work, appointment, or nothing at all"><div class="button-set modal-actions"><button class="button soft" type="button" data-action="close-modal">Cancel</button><button id="away-submit" class="button primary" type="submit">Confirm draft</button></div></form></dialog>
+      <dialog id="bill-dialog" class="modal"><form id="bill-form" method="dialog"><div class="modal-header"><h2>New scheduled bill</h2><button type="button" class="close-modal" data-action="close-modal">×</button></div><label for="bill-title">Bill name</label><input id="bill-title" name="title" maxlength="90" required placeholder="Electricity"><label for="bill-amount">Amount in dollars</label><input id="bill-amount" name="amount" type="number" min="0" max="1000000" step="0.01" required><label for="bill-date">Due date</label><input id="bill-date" name="date" type="date" required><label for="bill-owner">Attribution</label><select id="bill-owner" name="owner"><option value="shared">Shared</option><option value="andrew">Andrew</option><option value="greyson">Greyson</option></select><label for="bill-recurrence">Repeat</label><select id="bill-recurrence" name="recurrence"><option value="monthly">Monthly</option><option value="none">One-time</option></select><div class="button-set modal-actions"><button class="button soft" type="button" data-action="close-modal">Cancel</button><button class="button primary" type="submit">Save bill</button></div></form></dialog>
       <dialog id="bill-day-dialog" class="modal"><div class="modal-header"><h2>Bills due</h2><button class="close-modal" data-action="close-modal">×</button></div><div id="bill-day-content"></div><button class="button soft wide" data-action="close-modal">Close</button></dialog>
-      <dialog id="urgent-dialog" class="modal"><form id="urgent-form" method="dialog"><div class="modal-header"><h2>⚡ Coming home early</h2><button type="button" class="close-modal" data-action="close-modal">×</button></div><p class="muted small">Publish one urgent arrival change immediately. Your other drafts remain private.</p><label>Your published away block</label><select name="id">${(state.data.schedules[state.role]?.events||[]).filter(e=>e.end>Date.now()).map(e=>`<option value="${enc(e.id)}">${enc(new Date(e.start).toLocaleDateString('en-US',{month:'short',day:'numeric'}))} ${enc(humanTime(e.start))}–${enc(humanTime(e.end))}</option>`).join('')}</select><label>New arrival date and time</label><input name="arrival" type="datetime-local" required><div class="button-set modal-actions"><button class="button soft" type="button" data-action="close-modal">Cancel</button><button class="button primary" type="submit">Publish urgent update</button></div></form></dialog>`;
+      <dialog id="urgent-dialog" class="modal"><form id="urgent-form" method="dialog"><div class="modal-header"><h2>⚡ Coming home early</h2><button type="button" class="close-modal" data-action="close-modal">×</button></div><p class="muted small">Publish one urgent arrival change immediately. Your other drafts remain private.</p><label for="urgent-id">Your published away block</label><select id="urgent-id" name="id">${(state.data.schedules[state.role]?.events||[]).filter(e=>e.end>Date.now()).map(e=>`<option value="${enc(e.id)}">${enc(new Date(e.start).toLocaleDateString('en-US',{month:'short',day:'numeric'}))} ${enc(humanTime(e.start))}–${enc(humanTime(e.end))}</option>`).join('')}</select><label for="urgent-arrival">New arrival date and time</label><input id="urgent-arrival" name="arrival" type="datetime-local" required><div class="button-set modal-actions"><button class="button soft" type="button" data-action="close-modal">Cancel</button><button class="button primary" type="submit">Publish urgent update</button></div></form></dialog>`;
   }
   function dexLine() {
-    const x = state.data?.schedules || {};
-    const a = x.andrew?.events?.length || 0, g = x.greyson?.events?.length || 0;
-    const lines = [
-      'Both humans continue to schedule their own incompetence. Efficient.',
+    const schedules = state.data?.schedules || {};
+    const a = schedules.andrew?.events?.length || 0;
+    const g = schedules.greyson?.events?.length || 0;
+    const now = Date.now();
+    const greysonAway = schedules.greyson?.events?.find(e => e.start <= now && now < e.end);
+    const andrewAway = schedules.andrew?.events?.find(e => e.start <= now && now < e.end);
+    const bills = state.data?.bills?.filter(b => recurringOccurrence(b, localToday())) || [];
+    const observations = [
       'Weasel walks are not to be entered here. I will be issuing no reminders.',
       `${g} entries for Greyson. ${a} for Andrew. I decline to comment.`,
-      'You have opened the household ledger. I have lowered my expectations.',
-      'Another day, another demonstration of human dependence on clocks.',
-      'I see you have plans. I also see you have no dignity.'
+      'The household is organized. This was not my recommendation.',
+      `Daily report: ${state.fact?.category || 'trivia'}. I see the humans have discovered reading.`,
+      'Another day, another demonstration of human dependence on clocks.'
     ];
-    return lines[Math.floor(Date.now()/17000) % lines.length];
+    if (greysonAway && andrewAway) observations.unshift('Both humans are scheduled away. I have assumed command.');
+    else if (greysonAway && !andrewAway) observations.unshift('Greyson is out. Andrew remains at home. My investigation continues.');
+    if (bills.length) observations.unshift(`${bills.length} bill${bills.length===1?'':'s'} due today. I was promised a kingdom, not invoices.`);
+    return observations[Math.floor(now / 17000) % observations.length];
   }
-  function scheduleCameo() {
+  function scheduleCameo(onOpen = false) {
     clearTimeout(state.cameoTimer);
     if (state.step !== 'app') return;
     state.cameoTimer = setTimeout(() => {
@@ -295,8 +367,8 @@
       const familiar = document.getElementById('familiar');
       if (familiar) { familiar.querySelector('p').textContent = dexLine(); familiar.classList.add('show'); }
       setTimeout(() => { state.cameoVisible = false; document.getElementById('familiar')?.classList.remove('show'); }, 8500);
-      state.cameoTimer = setTimeout(scheduleCameo, 6000 + Math.floor(Math.random() * 11000));
-    }, 14000 + Math.floor(Math.random() * 17000));
+      state.cameoTimer = setTimeout(() => scheduleCameo(false), 15000 + Math.floor(Math.random() * 14000));
+    }, onOpen ? 900 : 11000 + Math.floor(Math.random() * 14000));
   }
   function render() {
     if (state.step === 'gate') app.innerHTML = gateMarkup();
@@ -305,26 +377,45 @@
     else if (state.step === 'app') app.innerHTML = appMarkup();
     if (state.step === 'app') initGestureHandlers();
   }
+  function renderWhenSafe() {
+    const dialogOpen = app.querySelector('dialog[open]');
+    const typingInterests = document.activeElement?.id === 'interest-input';
+    if (dialogOpen || typingInterests) { state.renderDeferred = true; return; }
+    state.renderDeferred = false;
+    render();
+  }
   async function refresh() {
     if (state.preview || !state.token) return;
-    const next = await api('/api/state');
-    const prior = state.data?.schedules[state.role]?.revision;
-    state.data = next;
-    if (state.dirty && prior !== undefined && prior !== next.schedules[state.role].revision) {
-      show('Your published schedule changed. Review your private drafts before publishing again.');
+    const requestId = ++state.refreshRequest;
+    try {
+      const next = await api('/api/state');
+      if (requestId !== state.refreshRequest || state.step !== 'app') return;
+      const previousConflict = state.draftConflict;
+      state.data = next;
+      state.lastSyncedAt = Date.now();
+      state.syncError = false;
+      if (!state.dirty) resetDraft();
+      else state.draftConflict = state.draftBaseRevision !== next.schedules[state.role].revision;
+      if (state.draftConflict && !previousConflict) show('Your published schedule changed. Private edits were preserved for review.');
+      state.fact ||= dayFact();
+      renderWhenSafe();
+    } catch (error) {
+      if (requestId === state.refreshRequest && state.step === 'app') {
+        state.syncError = true;
+        renderWhenSafe();
+      }
+      throw error;
     }
-    if (!state.dirty) resetDraft();
-    state.fact = dayFact();
-    render();
   }
   async function afterLogin(role, token) {
     state.role = role; state.token = token;
     localStorage.setItem('dex:token:v1', token);
     state.data = await api('/api/state');
     state.step = 'app'; state.preview = false;
+    state.syncError = false; state.lastSyncedAt = Date.now();
     restoreDraft();
-    state.fact = dayFact();
-    render(); scheduleCameo(); beginPolling();
+    state.fact = advanceFact();
+    render(); scheduleCameo(true); beginPolling();
   }
   async function init() {
     consumeInvite();
@@ -372,8 +463,14 @@
       if (form.id === 'away-form') {
         const date = String(data.get('date')), start = dayAt(date,String(data.get('from'))), end = dayAt(date,String(data.get('until')));
         if (!(end > start)) throw new Error('Return time must be after departure time');
-        state.draft.push({ id: crypto.randomUUID(), start, end, label: String(data.get('label')||'').trim() });
-        saveDraft(); form.closest('dialog').close(); render(); show('Draft saved privately. Publish when ready.'); return;
+        const id = String(data.get('eventId') || '');
+        const next = { id: id || crypto.randomUUID(), start, end, label: String(data.get('label')||'').trim() };
+        if (id) {
+          const index = state.draft.findIndex(item => item.id === id);
+          if (index < 0) throw new Error('That away block no longer exists. Refresh and retry.');
+          state.draft[index] = next;
+        } else state.draft.push(next);
+        saveDraft(); state.editingAwayId = null; form.closest('dialog').close(); render(); show('Draft saved privately. Publish when ready.'); return;
       }
       if (form.id === 'bill-form') {
         const cents = Math.round(Number(data.get('amount')) * 100);
@@ -384,7 +481,18 @@
         const newEnd = new Date(String(data.get('arrival'))).getTime();
         if (!Number.isSafeInteger(newEnd)) throw new Error('Enter a valid arrival time');
         if (!confirm('Publish this early return immediately? This notifies the other person in the in-app updates.')) return;
-        await api('/api/urgent','POST',{ id:data.get('id'),newEnd });
+        const id = String(data.get('id'));
+        const beforeRevision = state.data.schedules[state.role].revision;
+        const result = await api('/api/urgent','POST',{ id,newEnd });
+        if (state.dirty) {
+          const inDraft = state.draft.find(event => event.id === id);
+          if (!state.draftConflict && state.draftBaseRevision === beforeRevision && (!inDraft || inDraft.start < newEnd)) {
+            // Update only the urgent event; preserve every unrelated private edit.
+            if (inDraft) inDraft.end = newEnd;
+            state.draftBaseRevision = result.revision;
+            saveDraft();
+          } else state.draftConflict = true;
+        }
         form.closest('dialog').close(); await refresh(); show('Urgent change published. Your other drafts are untouched.'); return;
       }
       if (form.id === 'interests-form') {
@@ -394,10 +502,21 @@
       }
     });
   }
-  function openDialog(id) {
+  function openDialog(id, editId = null) {
     const dialog = document.getElementById(id);
     if (!dialog) return;
-    if (id==='edit-dialog') { dialog.querySelector('[name=date]').value = state.date; dialog.querySelector('[name=from]').value = '09:00'; dialog.querySelector('[name=until]').value = '17:00'; }
+    if (id==='edit-dialog') {
+      const existing = editId ? state.draft.find(item => item.id === editId) : null;
+      if (editId && !existing) { show('Away block not found. Refresh your schedule.'); return; }
+      state.editingAwayId = existing?.id || null;
+      dialog.querySelector('[name=eventId]').value = existing?.id || '';
+      dialog.querySelector('#away-modal-title').textContent = existing ? 'Edit your away draft' : 'Create an away draft';
+      dialog.querySelector('#away-submit').textContent = existing ? 'Confirm changes' : 'Confirm draft';
+      dialog.querySelector('[name=date]').value = existing ? localDateOf(existing.start) : state.date;
+      dialog.querySelector('[name=from]').value = existing ? hourInput(existing.start) : '09:00';
+      dialog.querySelector('[name=until]').value = existing ? hourInput(existing.end) : '17:00';
+      dialog.querySelector('[name=label]').value = existing?.label || '';
+    }
     if (id==='bill-dialog') dialog.querySelector('[name=date]').value = state.date;
     if (id==='urgent-dialog') {
       const row = state.data.schedules[state.role]?.events.find(e=>e.end>Date.now());
@@ -417,13 +536,34 @@
     if (!action) return;
     if (action==='back-to-gate') { state.step='gate'; state.ticket=null; render(); return; }
     if (action==='back-to-roles') { state.step='roles'; render(); return; }
-    if (action==='preview') { state.preview=true; state.role='andrew'; state.data=demoState(); state.step='app'; resetDraft(); state.fact=dayFact(); render(); scheduleCameo(); return; }
+    if (action==='preview') { state.preview=true; state.role='andrew'; state.data=demoState(); state.step='app'; resetDraft(); state.fact=advanceFact(); render(); scheduleCameo(true); return; }
     if (action==='hide-cameo') { state.cameoVisible=false; document.getElementById('familiar')?.classList.remove('show'); return; }
     if (action==='close-modal') { button.closest('dialog')?.close(); return; }
     if (action==='add-away') return openDialog('edit-dialog');
+    if (action==='edit-away') return openDialog('edit-dialog', button.dataset.id);
+    if (action==='remove-away') {
+      const id=button.dataset.id;
+      if (!state.draft.some(item => item.id === id)) return show('Away block not found.');
+      if (!confirm('Remove this away block from your private draft? The other person will not see this until Save & Sync.')) return;
+      state.draft = state.draft.filter(item => item.id !== id);
+      saveDraft(); render(); show('Removed privately. Save & Sync to publish the change.'); return;
+    }
+    if (action==='discard-draft') {
+      if (!confirm('Discard all unpublished schedule edits on this device?')) return;
+      resetDraft(); if (!state.preview) localStorage.removeItem(`dex:draft:${state.role}`);
+      render();show('Private edits discarded.');return;
+    }
+    if (action==='rebase-draft') {
+      if (!state.dirty || !state.draftConflict) return;
+      if (!confirm('The published schedule changed since you started. Keep your full private draft as the proposed schedule? Publishing it will replace any intervening changes on your own schedule.')) return;
+      state.draftBaseRevision = state.data.schedules[state.role].revision;
+      state.draftConflict = false;
+      saveDraft();render();show('Draft preserved against latest published revision. Review before Save & Sync.');return;
+    }
     if (action==='add-bill') return openDialog('bill-dialog');
     if (action==='urgent') return openDialog('urgent-dialog');
     if (action==='next-fact') return nextFact();
+    if (action==='open-trivia') { state.screen='trivia'; render(); return; }
     if (action==='show-updates') { state.screen='updates'; render(); return; }
     if (action==='prev-date' || action==='next-date') { state.date=addDays(state.date,(action==='next-date'?1:-1)*(state.view==='week'?7:1));state.fact=dayFact();render();return; }
     if (action==='bill-day') {
@@ -444,10 +584,16 @@
     await busyAction(async () => {
       if (action==='refresh') { await refresh();show('Checked for new updates.');return; }
       if (action==='publish') {
-        if (!state.dirty) return;
-        if (!confirm('Publish all your draft schedule changes and notify the other person?')) return;
-        const version = state.data.schedules[state.role].revision;
-        await api('/api/publish','POST',{events:state.draft,baseRevision:version});
+        if (!state.dirty || state.draftConflict || state.syncError) return;
+        if (!confirm('Publish all your private schedule changes and notify the other person?')) return;
+        try { await api('/api/publish','POST',{events:state.draft,baseRevision:state.draftBaseRevision}); }
+        catch (error) {
+          if (/schedule changed/i.test(error.message)) {
+            state.draftConflict = true;
+            await refresh().catch(() => {});
+          }
+          throw error;
+        }
         state.dirty=false; localStorage.removeItem(`dex:draft:${state.role}`);
         await refresh(); show('Published. One in-app update was created.'); return;
       }
@@ -494,10 +640,16 @@
     container.addEventListener('touchmove', event=>{if(touchStart!==null && event.touches.length===2){const a=event.touches[0],b=event.touches[1];const d=Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY);if(Math.abs(d-touchStart)>80){state.view=d<touchStart?'week':'day';touchStart=null;clearTimeout(timer);pointer=null;render();}}}, {passive:true});
     container.addEventListener('touchend',()=>{touchStart=null;}, {passive:true});
   }
+  app.addEventListener('close', event => {
+    if (event.target instanceof HTMLDialogElement && state.renderDeferred && !app.querySelector('dialog[open]')) queueMicrotask(renderWhenSafe);
+  }, true);
+  app.addEventListener('focusout', event => {
+    if (event.target.id === 'interest-input' && state.renderDeferred) setTimeout(() => { if (state.renderDeferred) renderWhenSafe(); }, 600);
+  }, true);
   app.addEventListener('submit',handleSubmit);
   app.addEventListener('click',clickAction);
   app.addEventListener('change',event=>{ if(event.target.id==='date-picker'){state.date=event.target.value;state.fact=dayFact();render();} });
-  document.addEventListener('visibilitychange',()=>{if(!document.hidden&&state.step==='app'&&!state.preview)refresh().catch(()=>{});});
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden&&state.step==='app'){if(!state.preview)refresh().catch(()=>{});scheduleCameo(true);}});
   if('serviceWorker' in navigator) window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(()=>{}));
   init();
 })();

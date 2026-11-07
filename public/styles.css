@@ -215,3 +215,37 @@ label { display:block; margin:15px 0 7px; color:var(--ink-soft); font-size:.82re
   .modal { padding:20px; }
 }
 @media(prefers-reduced-motion:reduce){* { animation:none!important;transition:none!important;scroll-behavior:auto!important; }}
+/* Private schedule editing is visible and tactile without promoting drafts. */
+.away-list { padding-bottom:12px; }
+.away-list .panel-header { margin-bottom:14px; }
+.away-items { display:flex;flex-direction:column; }
+.away-item { display:flex;align-items:center;gap:14px;padding:13px 3px;border-top:1px solid #34465d; }
+.away-status { color:#c8d7e8;font-size:.62rem;font-weight:750;letter-spacing:.07em;text-transform:uppercase;border:1px solid #4d5d71;border-radius:6px;padding:4px 7px;flex-shrink:0; }
+.away-status.pending { color:#cfe3ff;border-color:#688bbb;background:#42668b35; }
+.away-item-copy { display:flex;flex:1;min-width:0;flex-direction:column;gap:4px; }
+.away-item-copy strong { font-size:.86rem;line-height:1.35; }
+.away-item-actions { display:flex;align-items:center;gap:16px;flex-shrink:0; }
+.mini-link.danger { color:#f7b6b8; }
+.draft-conflict,.sync-warning { padding:17px 19px;margin:0 0 20px;border:1px solid #b28c62;border-radius:13px;background:#382d2d;color:#f7e4ce;font-size:.82rem;line-height:1.5; }
+.draft-conflict p { margin:8px 0 13px; }
+.draft-conflict button { background:#493939;border:1px solid #b28c62;color:#f9e1c6; }
+.sync-warning .mini-link { color:#fce4c3;margin-left:12px; }
+.daily-peek { display:grid;grid-template-columns:minmax(0,1fr) auto;gap:22px;align-items:center;margin-top:4px;padding:26px 27px;background:linear-gradient(115deg,#2d3048,#202c42);border-color:#54577d; }
+.daily-peek h3 { font-size:clamp(1.12rem,2vw,1.55rem);line-height:1.25;margin:7px 0 10px;letter-spacing:-.03em; }
+.daily-peek .eyebrow { color:#cdb9f9; }
+.daily-peek p.muted { font-size:.84rem;line-height:1.55;max-width:650px; }
+.dex-aside { display:block;font-size:.76rem;color:#e0d0f5;font-style:italic;margin-top:14px; }
+.daily-peek-actions { display:flex;flex-direction:column;gap:8px;min-width:154px; }
+.daily-peek-actions .button { font-size:.73rem;white-space:nowrap; }
+@media(max-width:760px) {
+  .daily-peek { grid-template-columns:1fr;padding:21px 17px;gap:17px; }
+  .daily-peek-actions { flex-direction:row;flex-wrap:wrap; }
+  .daily-peek-actions .button { flex:1;white-space:normal;min-width:118px; }
+  .away-item { align-items:flex-start;gap:10px;flex-wrap:wrap; }
+  .away-status { margin-top:1px; }
+  .away-item-actions { width:100%;justify-content:flex-end;margin-top:4px; }
+  .draft-conflict,.sync-warning { padding:14px 16px; }
+}
+
+.sync-stamp { display:block;margin-top:11px;border-top:1px solid #3f536a;padding-top:9px; }
+.daily-peek { margin-bottom:19px; }

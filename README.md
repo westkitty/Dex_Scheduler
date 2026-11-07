@@ -10,11 +10,13 @@ A two-person PWA for **Andrew and Greyson**, designed for Android and iPhone. It
 - Two fixed identities: **Andrew** (red) and **Greyson** (blue), with separate passwords and immutable role assignment on the private backend.
 - A personal registration setup link is required for each person. An outsider who guesses `Dexter` must **not** be able to seize the accounts.
 - Existing accounts sign in with their own passwords. Session tokens are validated by the private backend, never GitHub Pages.
-- A combined day/week timeline showing published red/blue/purple away times, creation of local private drafts, and an explicit **Save & Sync** publish action.
-- Owner-only schedule updates, revision-checked publication, and an independent **Coming home early** action. In-app publish/urgent update feed.
+- A combined day/week timeline showing published red/blue/purple away times, *per-block* lighter unpublished draft coloring, and explicit **Save & Sync**.
+- **Editable and removable away blocks**, including published blocks edited privately before batch publication. Discard-all-drafts is confirmed.
+- Revision-checked publication, preservation of drafts on conflict/reload, explicit confirmation before resolving conflicts, and an independent **Coming home early** action that preserves unrelated drafts. In-app publication/urgent update feed.
+- **Visible sync health** and a last-checked stamp; background refresh does not discard text being entered into open forms.
 - Shared scheduled monthly/one-time bills, paid dates and monthly attributed totals (shared bills counted once).
-- A small curated, sourced daily curiosity collection; interests from both people contribute to the same pool.
-- Lightweight Dexter **text cameo placeholder**. No likeness-dependent assets have been imported or represented as approved artwork.
+- A small curated, sourced daily curiosity collection, visible on the calendar and rotated with each opening; interests from both people contribute to the same pool.
+- Quick opening Dexter commentary plus occasional contextual, independently timed interjections. The familiar is still a **text cameo placeholder**. No likeness-dependent assets have been imported or represented as approved artwork.
 
 ### Not yet working in production
 
@@ -22,7 +24,8 @@ A two-person PWA for **Andrew and Greyson**, designed for Android and iPhone. It
 - **OS push notifications:** not implemented. The in-app update feed exists, but iPhone/Android push subscription, VAPID and delivery must be separately completed and tested on installed PWAs.
 - **OpenAI-powered commentary, generated trivia or meme images:** not yet integrated. No API key is in the frontend.
 - **Verified Dexter animated likeness:** pending genuine reference/asset approval and mobile animation testing. The displayed cameo is text-only.
-- **Full visual/pinch/gesture mobile QA:** day/week toggle and first-pass long-press interaction exist; device-level verification remains necessary.
+- **Full visual/pinch/gesture mobile QA:** day/week toggle and first-pass long-press interaction exist; basic Chromium desktop/mobile browser QA passes, but physical Android/iPhone gesture and install tests remain necessary.
+- **Bill editing/deletion, overnight away entry, password recovery and data export:** not yet provided; do not treat the current app as a complete household system.
 - **Offline multi-device publishing:** drafts can survive local restart; remote publication requires connectivity. On logout, this device's private drafts are erased.
 
 ## Repository layout
@@ -34,7 +37,7 @@ public/                Static, installable PWA for GitHub Pages
   config.js            Public API URL only (empty until backend exists)
   facts.js             Small curated fallback fact collection
   styles.css           Mobile-first appearance
-  sw.js                Offline shell cache (no push yet)
+  sw.js                Network-first static shell cache, no private API caching or push
 worker/
   src/index.js         Cloudflare Worker private API / authentication
   schema.sql           D1 schema
@@ -45,7 +48,7 @@ worker/
 
 ## GitHub Pages deployment
 
-The repository workflow publishes **only** `public/` to Pages after a push to `main`. It does not upload `worker/`, scripts or documentation as public site assets.
+The repository workflow runs Node syntax/API/service-worker checks before publishing **only** `public/` to Pages after a push to `main`. It does not upload `worker/`, scripts or documentation as public site assets.
 
 **First-time setup is a separate repository admin action:** open **Settings → Pages → Build and deployment → Source: GitHub Actions**. The included `configure-pages` action cannot initially enable Pages with the workflow's standard `GITHUB_TOKEN`; see the [GitHub Pages publishing source documentation](https://docs.github.com/en/pages/getting-started-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site).
 
@@ -73,12 +76,15 @@ If `apiBase` is empty, the site does **not** accept real accounts: only sample p
 
 ## Development and tests
 
-Requires Node.js 22+ for built-in SQLite test adapter. No npm install is required for the static frontend or unit/integration tests.
+Requires Node.js 22+ for the built-in SQLite test adapter. No npm install is required for the static frontend or Node tests. Python browser tests additionally require `playwright` and a local Chromium executable at `/usr/bin/chromium`. `tests/e2e_app.py` exercises the real Worker handler and two separately authenticated browser sessions using a local-only in-memory SQLite API bridge; it does not contact Cloudflare or demonstrate deployed sync.
 
 ```sh
 node --check public/app.js
 node --check worker/src/index.js
 node --experimental-sqlite --test tests/api.test.mjs
+node --test tests/sw.test.mjs
+python3 tests/smoke_browser.py
+python3 tests/e2e_app.py
 python3 -m http.server 8765 --directory public
 ```
 
@@ -92,8 +98,9 @@ After starting the local server, visit `http://localhost:8765/` to inspect the e
 - Combined timeline: red Andrew, blue Greyson, purple overlap; lighter private drafts and darker published segments.
 - Each person edits only their own schedule. Save & Sync is explicit; partner sees last published version until then.
 - Each successful batch publish creates **one generic** recipient update. Urgent arrival corrections create a **specific** recipient update and do not publish unrelated drafts.
+- Edited but unchanged published blocks remain dark; only unpublished changes go pale. Conflicts retain local drafts and require explicit review before publication.
 - Bills are shared records. Separate spending totals cover **scheduled bills only**, not everyday expenses.
 - Daily trivia uses a shared interest pool and may be date-specific or general.
 - Dexter may appear independently inside the app, but no GPS tracking or native phone companion is planned for the initial version.
 
-**Priority for the next implementation pass:** finish and deploy the private backend, configure Pages, then add cross-platform Web Push, test on real Android/iPhone installed PWAs, and connect verified Dexter assets and server-side AI at a deliberate cost cap.
+**Priority for the next implementation pass:** get access to the intended Cloudflare account, create the private D1 database, deploy and configure the Worker, test real account creation on two devices, then add Web Push and verified Dexter animation/server-side AI behind explicit cost and privacy controls. Until the Worker is actually deployed, the public Pages build remains clearly labeled preview only.

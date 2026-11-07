@@ -41,3 +41,13 @@ The initial code is a UX ceremony, not a second authentication factor. Do not pr
 - Drafts stay private until publish; a conflict never loses newer data.
 - iOS installed-PWA push and Android installed-PWA push must each be tested separately when implemented.
 - Sign out must revoke the current session and clear device drafts.
+
+## Browser update and draft safety (2026-11-07 uplift)
+
+- The versioned service worker allows **only the static shell** into its cache; all API routes remain network-only even if future hosting places them under the same origin. Offline fallback cannot masquerade as fresh household data.
+- The interface visibly warns when a refresh cannot reach the private service. Publishing is disabled during a confirmed connectivity outage. The last successful check time is shown.
+- Device-local private drafts survive reload and conflicting revisions. The app will not silently rebase or overwrite a changed published schedule; the owner must explicitly confirm a replacement or discard their draft.
+- A successful urgent return changes that published block alone and advances preserved drafts to the new revision when this is unambiguous.
+- The local two-account browser harness uses fixture passwords/invites **only in test code**. Never deploy `tests/dev_api_server.mjs`, its memory database, or its credentials as a public backend.
+
+**Limitations:** This is not a professional security audit, and none of these fixes turns the public GitHub Pages interface into a secure server. Worker deployment, separate credentials, push delivery, and physical-device testing are still necessary. No private customer records should be uploaded to this repository.

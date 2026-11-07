@@ -11,7 +11,24 @@ concurrency:
   group: pages
   cancel-in-progress: true
 jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check browser and Worker syntax
+        run: |
+          node --check public/app.js
+          node --check public/sw.js
+          node --check worker/src/index.js
+      - name: Test private API and offline caching
+        run: |
+          node --experimental-sqlite --test tests/api.test.mjs
+          node --test tests/sw.test.mjs
   deploy:
+    needs: verify
     runs-on: ubuntu-latest
     environment:
       name: github-pages
