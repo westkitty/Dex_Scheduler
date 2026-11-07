@@ -1,0 +1,17 @@
+{
+  "name": "dex-scheduler-api",
+  "main": "src/index.js",
+  "compatibility_date": "2026-11-07",
+  "workers_dev": true,
+  "vars": {
+    "APP_ORIGIN": "https://westkitty.github.io",
+    "ENROLLMENT_ENABLED": "false"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "dex-scheduler",
+      "database_id": "REPLACE_WITH_REAL_D1_DATABASE_ID"
+    }
+  ]
+}

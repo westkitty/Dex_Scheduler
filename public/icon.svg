@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" role="img" aria-label="DEX Scheduler">
+  <rect width="192" height="192" rx="43" fill="#151b2c"/>
+  <rect x="25" y="31" width="142" height="130" rx="23" fill="#232d42" stroke="#495773" stroke-width="4"/>
+  <path d="M25 67h142" stroke="#495773" stroke-width="4"/>
+  <rect x="43" y="86" width="42" height="58" rx="11" fill="#e56c82"/>
+  <rect x="85" y="86" width="37" height="58" rx="11" fill="#a27be2"/>
+  <rect x="122" y="86" width="25" height="58" rx="11" fill="#60a0ff"/>
+  <path d="M58 43v18m76-18v18" stroke="#d9e3f9" stroke-width="10" stroke-linecap="round"/>
+</svg>
