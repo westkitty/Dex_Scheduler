@@ -42,6 +42,9 @@ Protect: public static shell never stores real credentials, server derives ident
 
 Before another coding pass, read the current remote HEAD/tree, README, this ledger, `docs/SECURITY_AND_LIMITS.md` and the tests. The first external dependency to resolve is Cloudflare ownership/credentials and private backend deployment. Never discard unpublished local user edits or override a published revision silently. Use separate staging and verify GitHub Actions Pages deployment from the exact pushed revision.
 
-### Implementation commit
+### Implementation commit and CI receipt
 
-_To be appended after an actual remote commit and verification. No commit SHA is predicted._
+- **Remote implementation SHA:** `51011693cb312add5829f00b9f9761beef150120` on `westkitty/Dex_Scheduler` `main` (GitHub tree `91705a346c9a0e2d44f769e6fb19cb604c6d56fb`).
+- **GitHub Actions receipt:** [run 42366722513](https://github.com/westkitty/Dex_Scheduler/actions/runs/42366722513) completed successfully. Both `verify` (Node syntax, API, service-worker tests) and `deploy` (GitHub Pages) jobs succeeded for that exact implementation commit.
+- **Remaining external blocker:** the private Cloudflare Worker/D1 is *not* deployed; the publicly reachable Pages frontend still labels itself sample preview. Automated tests do not prove real phone push notifications or real two-device Cloudflare sync.
+- **This ledger receipt update** is a documentation-only follow-up; it does not alter published app code.
